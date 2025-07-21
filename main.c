@@ -41,14 +41,11 @@ void gpio_irq_handler(uint gpio, uint32_t events) {
 #define I2C_SCL_DISP 15
 #define endereco 0x3C
 
-// AGORA, ESTA VARIÁVEL SERÁ O ALVO DA NOSSA CALIBRAÇÃO
 volatile double g_sea_level_pressure = 101325.0; 
 volatile double g_altura_medida_pelo_google_earth_para_calibrar = 998;
-volatile bool g_recalibrar = true; // Força a calibração na primeira vez
+volatile bool g_recalibrar = true;
 
-// Esta função continua útil para calcular a altitude estimada
 double calculate_altitude_from_pressure(double local_pressure_pa) {
-    // Agora ela usa a variável g_sea_level_pressure, que será calibrada
     return 44330.0 * (1.0 - pow(local_pressure_pa / g_sea_level_pressure, 0.1903));
 }
 
@@ -65,16 +62,14 @@ volatile float g_pressao_kpa = 0.0f;
 volatile float g_temp_aht = 0.0f;
 volatile float g_umidade_aht = 0.0f;
 volatile float g_altitude = 0.0f;
+volatile float g_temp_media = 0.0f;
 volatile float g_p_min_kpa = 98.0f;
 volatile float g_p_max_kpa = 102.0f;
 volatile float g_u_min_perc = 40.0f;
 volatile float g_u_max_perc = 70.0f;
+volatile float g_t_min_celsius = 18.0f; // <-- ADICIONADO
+volatile float g_t_max_celsius = 28.0f; // <-- ADICIONADO
 
-// --- O restante do código de rede (quando_recebeu, etc.) permanece o mesmo ---
-// ... (vou omitir a parte da rede que não mudou para focar na correção)
-// A única mudança necessária na parte de rede é remover "offset_pa" do JSON enviado.
-// No entanto, para simplificar, você pode apenas deixar lá e ignorá-lo na página web,
-// ou pode removê-lo da string snprintf em GET /api/dados. Vamos deixar por enquanto.
 struct conexao_http {
     char *resposta;
     size_t tamanho;
@@ -121,8 +116,8 @@ static err_t quando_recebeu(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err
     if (strncmp(requisicao, "GET / ", 6) == 0) {
         size_t html_len = strlen(HTML_PAGINA);
         conn->tamanho = snprintf(conn->resposta, 1024 + html_len,
-                                 "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-                                 (int)html_len, HTML_PAGINA);
+                                   "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                   (int)html_len, HTML_PAGINA);
         tcp_arg(tpcb, conn);
         tcp_sent(tpcb, quando_enviou);
         tcp_write(tpcb, conn->resposta, conn->tamanho, TCP_WRITE_FLAG_COPY);
@@ -131,9 +126,14 @@ static err_t quando_recebeu(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err
         char json[512];
         snprintf(json, sizeof(json),
                  "{\"temp_bmp\":%.1f,\"pressao_kpa\":%.2f,\"temp_aht\":%.1f,\"umidade_aht\":%.1f,\"altitude\":%.1f,\"offset_pa\":%.2f,"
-                 "\"p_min\":%.1f,\"p_max\":%.1f,\"u_min\":%.1f,\"u_max\":%.1f,\"status\":\"ok\"}",
+                 "\"temp_media\":%.1f,"
+                 "\"p_min\":%.1f,\"p_max\":%.1f,\"u_min\":%.1f,\"u_max\":%.1f,"
+                 "\"t_min\":%.1f,\"t_max\":%.1f,"
+                 "\"status\":\"ok\"}",
                  g_temp_bmp, g_pressao_kpa, g_temp_aht, g_umidade_aht, g_altitude, g_sea_level_pressure,
-                 g_p_min_kpa, g_p_max_kpa, g_u_min_perc, g_u_max_perc);
+                 g_temp_media,
+                 g_p_min_kpa, g_p_max_kpa, g_u_min_perc, g_u_max_perc,
+                 g_t_min_celsius, g_t_max_celsius);
         enviar_resposta_http(conn, tpcb, "HTTP/1.1 200 OK", json);
     } else if (strncmp(requisicao, "POST /api/calibrate", 19) == 0) {
         char *body = strstr(requisicao, "\r\n\r\n");
@@ -152,19 +152,25 @@ static err_t quando_recebeu(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err
             char *pmax_str = strstr(body, "\"pmax\":");
             char *umin_str = strstr(body, "\"umin\":");
             char *umax_str = strstr(body, "\"umax\":");
+            char *tmin_str = strstr(body, "\"tmin\":");
+            char *tmax_str = strstr(body, "\"tmax\":");
             
             float pmin_new = pmin_str ? atof(pmin_str + 7) : g_p_min_kpa;
             float pmax_new = pmax_str ? atof(pmax_str + 7) : g_p_max_kpa;
             float umin_new = umin_str ? atof(umin_str + 7) : g_u_min_perc;
             float umax_new = umax_str ? atof(umax_str + 7) : g_u_max_perc;
+            float tmin_new = tmin_str ? atof(tmin_str + 7) : g_t_min_celsius;
+            float tmax_new = tmax_str ? atof(tmax_str + 7) : g_t_max_celsius;
 
-            if (pmax_new < pmin_new || umax_new < umin_new) {
+            if (pmax_new < pmin_new || umax_new < umin_new || tmax_new < tmin_new) {
                 enviar_resposta_http(conn, tpcb, "HTTP/1.1 400 Bad Request", "{\"status\":\"erro\", \"msg\":\"Máximo não pode ser menor que o mínimo.\"}");
             } else {
                 g_p_min_kpa = pmin_new;
                 g_p_max_kpa = pmax_new;
                 g_u_min_perc = umin_new;
                 g_u_max_perc = umax_new;
+                g_t_min_celsius = tmin_new;
+                g_t_max_celsius = tmax_new;
                 enviar_resposta_http(conn, tpcb, "HTTP/1.1 200 OK", "{\"status\":\"ok\"}");
             }
         }
@@ -187,9 +193,6 @@ static void iniciar_servidor_http(void) {
     tcp_accept(pcb, nova_conexao);
 }
 
-// ========================================
-// FUNÇÃO PRINCIPAL
-// ========================================
 int main() {
     stdio_init_all();
     sleep_ms(2000);
@@ -216,12 +219,10 @@ int main() {
 
     printf("Sistema pronto. IP: %s\n", ip4addr_ntoa(netif_ip4_addr(netif_default)));
 
-    // Para ser utilizado o modo BOOTSEL com botão B
     gpio_init(botaoB);
     gpio_set_dir(botaoB, GPIO_IN);
     gpio_pull_up(botaoB);
     gpio_set_irq_enabled_with_callback(botaoB, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
-    // Fim do trecho para modo BOOTSEL com botão B
 
     while (true) {
         cyw43_arch_poll();
@@ -231,20 +232,14 @@ int main() {
         int32_t temp_bmp_c100 = bmp280_convert_temp(raw_temp_bmp, &params);
         uint32_t pressure_pa = bmp280_convert_pressure(raw_pressure_pa_int, raw_temp_bmp, &params);
 
-        // --- NOVA LÓGICA DE CALIBRAÇÃO ---
         if (g_recalibrar) {
-            // Calcula a pressão ao nível do mar com base na altitude conhecida e na pressão local medida
             g_sea_level_pressure = pressure_pa / pow(1.0 - (g_altura_medida_pelo_google_earth_para_calibrar / 44330.0), 5.255);
             g_recalibrar = false;
             printf("✨ SENSOR CALIBRADO! Nova pressão ao nível do mar (QNH): %.2f Pa\n", g_sea_level_pressure);
         }
         
-        // --- ATUALIZA VARIÁVEIS GLOBAIS ---
-        // A pressão exibida é a pressão local REAL, sem correção.
         g_pressao_kpa = pressure_pa / 1000.0; 
         g_temp_bmp = temp_bmp_c100 / 100.0;
-        
-        // A altitude é calculada usando a pressão local real e a pressão ao nível do mar calibrada.
         g_altitude = calculate_altitude_from_pressure(pressure_pa);
         
         AHT20_Data data_aht;
@@ -253,18 +248,20 @@ int main() {
             g_umidade_aht = data_aht.humidity;
         }
 
+        g_temp_media = (g_temp_bmp + g_temp_aht) / 2.0f;
+
         // --- SAÍDA PARA O MONITOR SERIAL ---
         printf("----------------------------------------\n");
-        printf("Pressão Local Medida: %.2f kPa\n", g_pressao_kpa);
+        printf("Pressão Local Medida: %.2f kPa (Limites: %.1f-%.1f)\n", g_pressao_kpa, g_p_min_kpa, g_p_max_kpa);
         printf("Altitude Estimada...: %.2f m\n", g_altitude);
-        printf("Temperatura (BMP/AHT): %.2f C / %.2f C\n", g_temp_bmp, g_temp_aht);
-        printf("Umidade.............: %.2f %%\n", g_umidade_aht);
+        printf("Temperatura Média...: %.2f C (Limites: %.1f-%.1f)\n", g_temp_media, g_t_min_celsius, g_t_max_celsius);
+        printf("Umidade.............: %.2f %% (Limites: %.1f-%.1f)\n", g_umidade_aht, g_u_min_perc, g_u_max_perc);
         printf("QNH Calibrado.......: %.2f Pa\n", g_sea_level_pressure);
 
         // --- ATUALIZA DISPLAY (sem mudanças) ---
         char str_tmp_bmp[10], str_press[10], str_tmp_aht[10], str_umi[10];
         sprintf(str_tmp_bmp, "%.1fC", g_temp_bmp);
-        sprintf(str_press, "%.0fhPa", g_pressao_kpa * 10.0); // hPa = kPa * 10
+        sprintf(str_press, "%.0fhPa", g_pressao_kpa * 10.0);
         sprintf(str_tmp_aht, "%.1fC", g_temp_aht);
         sprintf(str_umi, "%.1f%%", g_umidade_aht);
 
