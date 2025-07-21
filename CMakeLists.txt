@@ -43,6 +43,7 @@ add_executable(main main.c
         lib/ssd1306.c
         lib/buzzer.c
         lib/matrizRGB.c
+        lib/leds.c
         )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR})

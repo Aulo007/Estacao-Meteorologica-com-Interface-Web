@@ -9,6 +9,7 @@
 #include <math.h>
 #include "lib/matrizRGB.h"
 #include "lib/buzzer.h"
+#include "lib/leds.h"
 
 // ========================================
 // CONFIGURAÇÕES BÁSICAS
@@ -262,6 +263,7 @@ int main()
 
     inicializar_buzzer(buzzer_pin);
     npInit(7);
+    led_init();
 
     while (true)
     {
@@ -323,19 +325,44 @@ int main()
         bool press_fora_limite = g_pressao_kpa < g_p_min_kpa || g_pressao_kpa > g_p_max_kpa;
         bool umid_fora_limite = g_umidade_aht < g_u_min_perc || g_umidade_aht > g_u_max_perc;
 
+        if (temp_fora_limite)
+        {
+            npSetColumn(0, COLOR_RED);
+        }
+        else
+        {
+            npSetColumn(0, COLOR_GREEN);
+        }
+
+        if (press_fora_limite)
+        {
+            npSetColumn(2, COLOR_RED);
+        }
+        else
+        {
+            npSetColumn(2, COLOR_GREEN);
+        }
+        if (umid_fora_limite)
+        {
+            npSetColumn(4, COLOR_RED);
+        }
+        else
+        {
+            npSetColumn(4, COLOR_GREEN);
+        }
+
         if (temp_fora_limite || press_fora_limite || umid_fora_limite)
         {
             // Condição de Alarme: Pelo menos um sensor está fora dos limites
             ativar_buzzer(buzzer_pin);
-            npFillIntensity(COLOR_RED, 1); // Assumindo que COLOR_RED está em matrizRGB.h
+            acender_led_rgb(255, 0, 0);
         }
         else
         {
             // Condição Normal: Todos os sensores estão dentro dos limites
             desativar_buzzer(buzzer_pin);
-            npFillIntensity(COLOR_GREEN, 1); // Assumindo que COLOR_GREEN está em matrizRGB.h
+            acender_led_rgb(0, 255, 0);
         }
-        // =======================================================
 
         sleep_ms(2000);
     }
