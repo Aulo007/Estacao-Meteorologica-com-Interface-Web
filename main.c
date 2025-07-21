@@ -7,6 +7,8 @@
 #include "lib/ssd1306.h"
 #include "lib/font.h"
 #include <math.h>
+#include "lib/matrizRGB.h"
+#include "lib/buzzer.h"
 
 // ========================================
 // CONFIGURAÇÕES BÁSICAS
@@ -26,7 +28,8 @@
 #include "pico/bootrom.h"
 #define botaoB 6
 
-void gpio_irq_handler(uint gpio, uint32_t events) {
+void gpio_irq_handler(uint gpio, uint32_t events)
+{
     reset_usb_boot(0, 0);
 }
 
@@ -41,11 +44,12 @@ void gpio_irq_handler(uint gpio, uint32_t events) {
 #define I2C_SCL_DISP 15
 #define endereco 0x3C
 
-volatile double g_sea_level_pressure = 101325.0; 
+volatile double g_sea_level_pressure = 101325.0;
 volatile double g_altura_medida_pelo_google_earth_para_calibrar = 998;
 volatile bool g_recalibrar = true;
 
-double calculate_altitude_from_pressure(double local_pressure_pa) {
+double calculate_altitude_from_pressure(double local_pressure_pa)
+{
     return 44330.0 * (1.0 - pow(local_pressure_pa / g_sea_level_pressure, 0.1903));
 }
 
@@ -69,25 +73,31 @@ volatile float g_u_min_perc = 40.0f;
 volatile float g_u_max_perc = 70.0f;
 volatile float g_t_min_celsius = 18.0f; // <-- ADICIONADO
 volatile float g_t_max_celsius = 28.0f; // <-- ADICIONADO
+#define buzzer_pin 21
 
-struct conexao_http {
+struct conexao_http
+{
     char *resposta;
     size_t tamanho;
     size_t enviado;
 };
 
-static err_t quando_enviou(void *arg, struct tcp_pcb *tpcb, u16_t len) {
+static err_t quando_enviou(void *arg, struct tcp_pcb *tpcb, u16_t len)
+{
     struct conexao_http *conn = (struct conexao_http *)arg;
     conn->enviado += len;
-    if (conn->enviado >= conn->tamanho) {
+    if (conn->enviado >= conn->tamanho)
+    {
         tcp_close(tpcb);
-        if (conn->resposta) free(conn->resposta);
+        if (conn->resposta)
+            free(conn->resposta);
         free(conn);
     }
     return ERR_OK;
 }
 
-static void enviar_resposta_http(struct conexao_http *conn, struct tcp_pcb *tpcb, const char *http_status, const char *body) {
+static void enviar_resposta_http(struct conexao_http *conn, struct tcp_pcb *tpcb, const char *http_status, const char *body)
+{
     conn->tamanho = snprintf(conn->resposta, 1024,
                              "%s\r\n"
                              "Content-Type: application/json; charset=UTF-8\r\n"
@@ -103,8 +113,10 @@ static void enviar_resposta_http(struct conexao_http *conn, struct tcp_pcb *tpcb
     tcp_output(tpcb);
 }
 
-static err_t quando_recebeu(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
-    if (!p) {
+static err_t quando_recebeu(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
+{
+    if (!p)
+    {
         tcp_close(tpcb);
         return ERR_OK;
     }
@@ -112,17 +124,20 @@ static err_t quando_recebeu(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err
     struct conexao_http *conn = malloc(sizeof(struct conexao_http));
     conn->resposta = malloc(1024);
     conn->enviado = 0;
-    
-    if (strncmp(requisicao, "GET / ", 6) == 0) {
+
+    if (strncmp(requisicao, "GET / ", 6) == 0)
+    {
         size_t html_len = strlen(HTML_PAGINA);
         conn->tamanho = snprintf(conn->resposta, 1024 + html_len,
-                                   "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-                                   (int)html_len, HTML_PAGINA);
+                                 "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                 (int)html_len, HTML_PAGINA);
         tcp_arg(tpcb, conn);
         tcp_sent(tpcb, quando_enviou);
         tcp_write(tpcb, conn->resposta, conn->tamanho, TCP_WRITE_FLAG_COPY);
         tcp_output(tpcb);
-    } else if (strncmp(requisicao, "GET /api/dados", 14) == 0) {
+    }
+    else if (strncmp(requisicao, "GET /api/dados", 14) == 0)
+    {
         char json[512];
         snprintf(json, sizeof(json),
                  "{\"temp_bmp\":%.1f,\"pressao_kpa\":%.2f,\"temp_aht\":%.1f,\"umidade_aht\":%.1f,\"altitude\":%.1f,\"offset_pa\":%.2f,"
@@ -135,26 +150,33 @@ static err_t quando_recebeu(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err
                  g_p_min_kpa, g_p_max_kpa, g_u_min_perc, g_u_max_perc,
                  g_t_min_celsius, g_t_max_celsius);
         enviar_resposta_http(conn, tpcb, "HTTP/1.1 200 OK", json);
-    } else if (strncmp(requisicao, "POST /api/calibrate", 19) == 0) {
+    }
+    else if (strncmp(requisicao, "POST /api/calibrate", 19) == 0)
+    {
         char *body = strstr(requisicao, "\r\n\r\n");
-        if (body) {
+        if (body)
+        {
             char *value_ptr = strstr(body, ":");
-            if (value_ptr) {
+            if (value_ptr)
+            {
                 g_altura_medida_pelo_google_earth_para_calibrar = strtod(value_ptr + 1, NULL);
                 g_recalibrar = true;
                 enviar_resposta_http(conn, tpcb, "HTTP/1.1 200 OK", "{\"status\":\"ok\"}");
             }
         }
-    } else if (strncmp(requisicao, "POST /api/limits", 16) == 0) {
+    }
+    else if (strncmp(requisicao, "POST /api/limits", 16) == 0)
+    {
         char *body = strstr(requisicao, "\r\n\r\n");
-        if (body) {
+        if (body)
+        {
             char *pmin_str = strstr(body, "\"pmin\":");
             char *pmax_str = strstr(body, "\"pmax\":");
             char *umin_str = strstr(body, "\"umin\":");
             char *umax_str = strstr(body, "\"umax\":");
             char *tmin_str = strstr(body, "\"tmin\":");
             char *tmax_str = strstr(body, "\"tmax\":");
-            
+
             float pmin_new = pmin_str ? atof(pmin_str + 7) : g_p_min_kpa;
             float pmax_new = pmax_str ? atof(pmax_str + 7) : g_p_max_kpa;
             float umin_new = umin_str ? atof(umin_str + 7) : g_u_min_perc;
@@ -162,9 +184,12 @@ static err_t quando_recebeu(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err
             float tmin_new = tmin_str ? atof(tmin_str + 7) : g_t_min_celsius;
             float tmax_new = tmax_str ? atof(tmax_str + 7) : g_t_max_celsius;
 
-            if (pmax_new < pmin_new || umax_new < umin_new || tmax_new < tmin_new) {
+            if (pmax_new < pmin_new || umax_new < umin_new || tmax_new < tmin_new)
+            {
                 enviar_resposta_http(conn, tpcb, "HTTP/1.1 400 Bad Request", "{\"status\":\"erro\", \"msg\":\"Máximo não pode ser menor que o mínimo.\"}");
-            } else {
+            }
+            else
+            {
                 g_p_min_kpa = pmin_new;
                 g_p_max_kpa = pmax_new;
                 g_u_min_perc = umin_new;
@@ -174,32 +199,37 @@ static err_t quando_recebeu(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err
                 enviar_resposta_http(conn, tpcb, "HTTP/1.1 200 OK", "{\"status\":\"ok\"}");
             }
         }
-    } else {
+    }
+    else
+    {
         enviar_resposta_http(conn, tpcb, "HTTP/1.1 404 Not Found", "{\"status\":\"erro\", \"msg\":\"Rota não encontrada\"}");
     }
     pbuf_free(p);
     return ERR_OK;
 }
 
-static err_t nova_conexao(void *arg, struct tcp_pcb *newpcb, err_t err) {
+static err_t nova_conexao(void *arg, struct tcp_pcb *newpcb, err_t err)
+{
     tcp_recv(newpcb, quando_recebeu);
     return ERR_OK;
 }
 
-static void iniciar_servidor_http(void) {
+static void iniciar_servidor_http(void)
+{
     struct tcp_pcb *pcb = tcp_new();
     tcp_bind(pcb, IP_ADDR_ANY, 80);
     pcb = tcp_listen(pcb);
     tcp_accept(pcb, nova_conexao);
 }
 
-int main() {
+int main()
+{
     stdio_init_all();
     sleep_ms(2000);
     cyw43_arch_init();
     cyw43_arch_enable_sta_mode();
     cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASS, CYW43_AUTH_WPA2_AES_PSK, 15000);
-    
+
     iniciar_servidor_http();
 
     i2c_init(I2C_PORT_DISP, 400 * 1000);
@@ -211,7 +241,7 @@ int main() {
     i2c_init(I2C_PORT, 400 * 1000);
     gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
     gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
-    
+
     bmp280_init(I2C_PORT);
     struct bmp280_calib_param params;
     bmp280_get_calib_params(I2C_PORT, &params);
@@ -224,26 +254,32 @@ int main() {
     gpio_pull_up(botaoB);
     gpio_set_irq_enabled_with_callback(botaoB, GPIO_IRQ_EDGE_FALL, true, &gpio_irq_handler);
 
-    while (true) {
+    inicializar_buzzer(buzzer_pin);
+    npInit(7);
+
+    while (true)
+    {
         cyw43_arch_poll();
-        
+
         int32_t raw_temp_bmp, raw_pressure_pa_int;
         bmp280_read_raw(I2C_PORT, &raw_temp_bmp, &raw_pressure_pa_int);
         int32_t temp_bmp_c100 = bmp280_convert_temp(raw_temp_bmp, &params);
         uint32_t pressure_pa = bmp280_convert_pressure(raw_pressure_pa_int, raw_temp_bmp, &params);
 
-        if (g_recalibrar) {
+        if (g_recalibrar)
+        {
             g_sea_level_pressure = pressure_pa / pow(1.0 - (g_altura_medida_pelo_google_earth_para_calibrar / 44330.0), 5.255);
             g_recalibrar = false;
             printf("✨ SENSOR CALIBRADO! Nova pressão ao nível do mar (QNH): %.2f Pa\n", g_sea_level_pressure);
         }
-        
-        g_pressao_kpa = pressure_pa / 1000.0; 
+
+        g_pressao_kpa = pressure_pa / 1000.0;
         g_temp_bmp = temp_bmp_c100 / 100.0;
         g_altitude = calculate_altitude_from_pressure(pressure_pa);
-        
+
         AHT20_Data data_aht;
-        if (aht20_read(I2C_PORT, &data_aht)) {
+        if (aht20_read(I2C_PORT, &data_aht))
+        {
             g_temp_aht = data_aht.temperature;
             g_umidade_aht = data_aht.humidity;
         }
@@ -277,7 +313,26 @@ int main() {
         ssd1306_draw_string(&ssd, str_umi, 76, 48);
         ssd1306_send_data(&ssd);
 
+        bool temp_fora_limite = g_temp_media < g_t_min_celsius || g_temp_media > g_t_max_celsius;
+        bool press_fora_limite = g_pressao_kpa < g_p_min_kpa || g_pressao_kpa > g_p_max_kpa;
+        bool umid_fora_limite = g_umidade_aht < g_u_min_perc || g_umidade_aht > g_u_max_perc;
+
+        if (temp_fora_limite || press_fora_limite || umid_fora_limite)
+        {
+            // Condição de Alarme: Pelo menos um sensor está fora dos limites
+            ativar_buzzer(buzzer_pin);
+            npFillIntensity(COLOR_RED, 1); // Assumindo que COLOR_RED está em matrizRGB.h
+        }
+        else
+        {
+            // Condição Normal: Todos os sensores estão dentro dos limites
+            desativar_buzzer(buzzer_pin);
+            npFillIntensity(COLOR_GREEN, 1); // Assumindo que COLOR_GREEN está em matrizRGB.h
+        }
+        // =======================================================
+
         sleep_ms(2000);
     }
+
     return 0;
 }
