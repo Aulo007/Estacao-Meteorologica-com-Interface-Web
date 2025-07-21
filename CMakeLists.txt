@@ -6,26 +6,6 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Initialise pico_sdk from installed location
-# (note this can come from environment, CMake cache etc)
-
-# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
-if(WIN32)
-        set(USERHOME $ENV{USERPROFILE})
-else()
-        set(USERHOME $ENV{HOME})
-endif()
-
-set(sdkVersion 2.1.1)
-set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.1.1)
-set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
-
-if(EXISTS ${picoVscode})
-        include(${picoVscode})
-endif()
-
-# ====================================================================================
 set(PICO_BOARD pico_w CACHE STRING "Board type")
 
 # Pull in Raspberry Pi Pico SDK (must be before project)
@@ -44,7 +24,7 @@ add_executable(main main.c
         lib/buzzer.c
         lib/matrizRGB.c
         lib/leds.c
-        )
+)
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR})
 pico_set_program_name(main "main")
@@ -59,8 +39,8 @@ pico_enable_stdio_usb(main 1)
 target_link_libraries(main
         pico_stdlib
         hardware_i2c
-        hardware_adc   
-        hardware_pwm     
+        hardware_adc
+        hardware_pwm
         pico_cyw43_arch_lwip_threadsafe_background)
 
 # Add the standard include files to the build
