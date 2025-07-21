@@ -198,3 +198,47 @@ void ssd1306_draw_string(ssd1306_t *ssd, const char *str, uint8_t x, uint8_t y)
     }
   }
 }
+
+void ssd1306_draw_bitmap(ssd1306_t *ssd, uint8_t x, uint8_t y, const uint8_t *bitmap, uint8_t width, uint8_t height)
+{
+  // Calcula a página inicial e o número de páginas do bitmap
+  uint8_t start_page = y / 8;
+  uint8_t num_pages = height / 8;
+
+  // Ajusta o número de páginas se exceder o limite do display
+  if (start_page + num_pages > ssd->pages)
+  {
+    num_pages = ssd->pages - start_page;
+  }
+
+  // Itera sobre cada coluna do bitmap
+  for (uint8_t x_offset = 0; x_offset < width; x_offset++)
+  {
+    uint8_t current_x = x + x_offset;
+    // Verifica se a coluna atual está dentro dos limites do display
+    if (current_x >= ssd->width)
+      break;
+
+    // Itera sobre cada página do bitmap
+    for (uint8_t page = 0; page < num_pages; page++)
+    {
+      uint8_t current_page = start_page + page;
+      // Verifica se a página atual está dentro dos limites
+      if (current_page >= ssd->pages)
+        break;
+
+      // Obtém o byte correspondente do bitmap
+      uint16_t bitmap_index = x_offset + page * width;
+      uint8_t byte = bitmap[bitmap_index];
+
+      // Calcula a posição no buffer do display
+      uint16_t buffer_index = 1 + current_x + (current_page * ssd->width);
+
+      // Atualiza o buffer apenas se o índice for válido
+      if (buffer_index < ssd->bufsize)
+      {
+        ssd->ram_buffer[buffer_index] = byte;
+      }
+    }
+  }
+}
